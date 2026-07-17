@@ -7,6 +7,7 @@
    - Everything below that just runs the calculator + syncs data.
    ===================================================================== */
 
+const PASSWORD_ENABLED = false; // <-- set this back to true to turn the password screen back on
 const TEAM_PASSWORD = "YUNGATHA2026"; // <-- change this to whatever password you want the team to use
 
 const firebaseConfig = {
@@ -84,6 +85,12 @@ function checkPassword() {
 document.getElementById("passwordInput").addEventListener("keydown", e => {
   if (e.key === "Enter") checkPassword();
 });
+
+// If the password gate is turned off, skip straight past it on load.
+if (!PASSWORD_ENABLED) {
+  document.getElementById("screenPassword").style.display = "none";
+  startAuthAndProceed();
+}
 
 function startAuthAndProceed() {
   auth.signInAnonymously().then(() => {
