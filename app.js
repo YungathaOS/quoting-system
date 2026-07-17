@@ -890,37 +890,126 @@ function parseImportFile(file, callback) {
   }
 }
 
+// ---------------- COLUMN MAPPING (used by all 3 importers) ----------------
+// Instead of guessing which column means what, the user is shown every column
+// found in their file and picks which one maps to each field. A best guess is
+// pre-selected so most of the time it's just "confirm and go".
+function guessHeaderForField(headers, aliases) {
+  for (const alias of aliases) {
+    const found = headers.find(h => h.trim().toLowerCase() === alias.trim().toLowerCase());
+    if (found) return found;
+  }
+  return "";
+}
+function openColumnMappingModal(rows, fieldDefs, onConfirm) {
+  if (!rows.length) { alert("No rows found in the file."); return; }
+  const headers = Object.keys(rows[0]);
+  if (!headers.length) { alert("Couldn't find a header row in the file."); return; }
+  const guesses = {};
+  fieldDefs.forEach(f => { guesses[f.key] = guessHeaderForField(headers, f.aliases); });
+  const optionsHtml = headers.map(h => `<option value="${escapeAttr(h)}">${escapeHtml(h)}</option>`).join("");
+  openModal(`
+    <span class="close-x" onclick="closeModal()">✕</span>
+    <h3>Map Your Columns</h3>
+    <p class="small">${rows.length} row(s) found. For each field below, pick the matching column from your file (best guesses are pre-selected — change any that are wrong, or leave "(none)" to skip).</p>
+    ${fieldDefs.map(f => `
+      <label>${escapeHtml(f.label)}${f.required ? " *" : ""}</label>
+      <select class="editable-input" id="colmap_${f.key}">
+        <option value="">(none)</option>
+        ${optionsHtml}
+      </select>
+    `).join("")}
+    <button onclick="confirmColumnMapping()">Next →</button>
+  `);
+  // pre-select the guessed option for each field (can't rely on inline <script> reliably re-running, so set directly)
+  fieldDefs.forEach(f => {
+    const sel = document.getElementById("colmap_" + f.key);
+    if (sel && guesses[f.key]) sel.value = guesses[f.key];
+  });
+  window._pendingColumnMap = { rows, fieldDefs, onConfirm };
+}
+function confirmColumnMapping() {
+  const pending = window._pendingColumnMap;
+  if (!pending) return;
+  const { rows, fieldDefs, onConfirm } = pending;
+  const mapping = {};
+  const missingRequired = [];
+  fieldDefs.forEach(f => {
+    const el = document.getElementById("colmap_" + f.key);
+    const val = el ? el.value : "";
+    mapping[f.key] = val;
+    if (f.required && !val) missingRequired.push(f.label);
+  });
+  if (missingRequired.length) { alert("Please map a column for: " + missingRequired.join(", ")); return; }
+  onConfirm(rows, mapping);
+}
+function mappedVal(row, mapping, key) {
+  const col = mapping[key];
+  if (!col) return "";
+  const v = row[col];
+  return v === undefined || v === null ? "" : v;
+}
+
 // ---------------- PRICE LOOKUP IMPORT (CSV / Excel) ----------------
+const PL_FIELD_DEFS = [
+  { key: "description", label: "Description", required: true, aliases: ["Description", "Item Description", "Item", "Item Name", "Product", "Product Name", "Name", "Desc"] },
+  { key: "section", label: "Section (Standard / RAW MATERIALS / Accessories / Labour)", required: false, aliases: ["Section", "Group", "Category Group"] },
+  { key: "materialType", label: "Material Type (Substrate/Vinyl/Overlay — raw materials only)", required: false, aliases: ["Material Type", "MaterialType"] },
+  { key: "category", label: "Category", required: false, aliases: ["Category", "Cat"] },
+  { key: "type", label: "Type", required: false, aliases: ["Sub Type", "SubType", "Item Type", "Type"] },
+  { key: "dimensions", label: "Dimensions", required: false, aliases: ["Dimensions", "Dimension", "Size"] },
+  { key: "w", label: "Width (mm)", required: false, aliases: ["W", "Width", "Width (mm)", "W (mm)"] },
+  { key: "h", label: "Height (mm)", required: false, aliases: ["H", "Height", "Height (mm)", "H (mm)"] },
+  { key: "substrate", label: "Substrate", required: false, aliases: ["Substrate", "Material"] },
+  { key: "vinyl", label: "Vinyl / Film", required: false, aliases: ["Vinyl", "Film", "Vinyl / Film"] },
+  { key: "overlay", label: "Overlay", required: false, aliases: ["Overlay", "Laminate"] },
+  { key: "itemNumber", label: "Item Number", required: false, aliases: ["Item Number", "Item No", "Code", "SKU"] },
+  { key: "notes", label: "Notes", required: false, aliases: ["Notes", "Note", "Comment", "Comments"] },
+  { key: "p100", label: "100% Price", required: false, aliases: ["100%", "p100", "P100"] },
+  { key: "p110", label: "110% Price", required: false, aliases: ["110%", "p110", "P110"] },
+  { key: "p120", label: "120% Price", required: false, aliases: ["120%", "p120", "P120"] },
+  { key: "p140", label: "140% Price", required: false, aliases: ["140%", "p140", "P140"] },
+  { key: "p180", label: "180% Price", required: false, aliases: ["180%", "p180", "P180"] },
+  { key: "singlePrice", label: "Single Price (fills ALL 5 tiers above if they're left blank)", required: false, aliases: ["Price", "Sell Price", "Selling Price", "Unit Price", "Rate", "Cost", "Amount", "Sell"] }
+];
 function handlePriceLookupCsv(event) {
   const file = event.target.files[0];
   if (!file) return;
-  parseImportFile(file, rows => promptImportMode(rows, importPriceLookupRows));
+  parseImportFile(file, rows => openColumnMappingModal(rows, PL_FIELD_DEFS, (rows, mapping) => {
+    promptImportMode(rows, importPriceLookupRows, buildPriceLookupPreview(rows, mapping), mapping);
+  }));
   event.target.value = "";
 }
-function promptImportMode(rows, importFn) {
+function buildPriceLookupPreview(rows, mapping) {
+  const sample = rows.slice(0, 3).map(r => rowToPriceLookupItem(r, mapping));
+  return `<p class="small">First rows as they'll be imported (Description → 100% price):</p>
+    <ul class="small">${sample.map(r => `<li>${escapeHtml(r.description || "(blank description)")} → ${r.p100 !== null && r.p100 !== undefined ? r.p100 : "—"}</li>`).join("")}</ul>`;
+}
+function promptImportMode(rows, importFn, previewHtml, mapping) {
   openModal(`
     <span class="close-x" onclick="closeModal()">✕</span>
     <h3>Import ${rows.length} row(s)</h3>
+    ${previewHtml || ""}
     <p class="small">Choose how to handle the existing data:</p>
     <label><input type="radio" name="importMode" value="replace"> Clear everything currently existing, then upload this file</label>
     <label><input type="radio" name="importMode" value="skipDupes" checked> Skip duplicates — only add rows that aren't already in the list</label>
     <label><input type="radio" name="importMode" value="appendAll"> Just add straight on (don't check for duplicates)</label>
     <button onclick="runImport()">Import</button>
   `);
-  window._pendingImport = { rows, importFn };
+  window._pendingImport = { rows, importFn, mapping };
 }
 function runImport() {
   const mode = document.querySelector('input[name="importMode"]:checked')?.value || "skipDupes";
-  const { rows, importFn } = window._pendingImport || {};
+  const { rows, importFn, mapping } = window._pendingImport || {};
   if (!rows) return;
-  importFn(rows, mode);
+  importFn(rows, mode, mapping);
   closeModal();
 }
-function importPriceLookupRows(rows, mode) {
+function importPriceLookupRows(rows, mode, mapping) {
   const collection = db.collection("priceLookup");
   const existingKeys = new Set(PRICE_LOOKUP.map(i => (i.description || "").toLowerCase()));
   const finish = () => {
-    let toAdd = rows.map(csvRowToPriceLookupItem).filter(r => r.description);
+    let toAdd = rows.map(r => rowToPriceLookupItem(r, mapping)).filter(r => r.description);
     if (mode === "skipDupes") toAdd = toAdd.filter(r => !existingKeys.has(r.description.toLowerCase()));
     let batch = db.batch(); let count = 0; const commits = [];
     toAdd.forEach(item => {
@@ -932,7 +1021,11 @@ function importPriceLookupRows(rows, mode) {
     commits.push(batch.commit());
     Promise.all(commits).then(() => {
       logHistory("Imported price lookup file (" + mode + ")", toAdd.length + " row(s)");
-      alert("Imported " + toAdd.length + " row(s).");
+      if (!toAdd.length && rows.length) {
+        alert("Imported 0 row(s) out of " + rows.length + " — every row was blank in the Description column you mapped. Try the import again and double check the Description mapping.");
+      } else {
+        alert("Imported " + toAdd.length + " row(s).");
+      }
     });
   };
   if (mode === "replace") {
@@ -941,29 +1034,39 @@ function importPriceLookupRows(rows, mode) {
     finish();
   }
 }
-function csvRowToPriceLookupItem(row) {
-  const get = (...keys) => { for (const k of keys) { if (row[k] !== undefined && row[k] !== "") return row[k]; } return ""; };
-  const num = v => v === "" || v === undefined ? null : parseFloat(v);
+function rowToPriceLookupItem(row, mapping) {
+  const num = v => v === "" || v === undefined || v === null ? null : parseFloat(v);
+  const str = v => String(v === undefined || v === null ? "" : v).trim();
+
+  const description = str(mappedVal(row, mapping, "description"));
+  const section = str(mappedVal(row, mapping, "section")) || "Standard";
+  const materialType = str(mappedVal(row, mapping, "materialType"));
+  const category = str(mappedVal(row, mapping, "category"));
+  const type = str(mappedVal(row, mapping, "type"));
+  const dimensions = str(mappedVal(row, mapping, "dimensions"));
+  const w = num(mappedVal(row, mapping, "w"));
+  const h = num(mappedVal(row, mapping, "h"));
+  const substrate = str(mappedVal(row, mapping, "substrate"));
+  const vinyl = str(mappedVal(row, mapping, "vinyl"));
+  const overlay = str(mappedVal(row, mapping, "overlay"));
+  const notes = str(mappedVal(row, mapping, "notes"));
+  const itemNumber = str(mappedVal(row, mapping, "itemNumber")) || nextItemNumber("PL");
+
+  let p100 = num(mappedVal(row, mapping, "p100"));
+  let p110 = num(mappedVal(row, mapping, "p110"));
+  let p120 = num(mappedVal(row, mapping, "p120"));
+  let p140 = num(mappedVal(row, mapping, "p140"));
+  let p180 = num(mappedVal(row, mapping, "p180"));
+
+  if (p100 === null && p110 === null && p120 === null && p140 === null && p180 === null) {
+    const single = num(mappedVal(row, mapping, "singlePrice"));
+    if (single !== null) { p100 = p110 = p120 = p140 = p180 = single; }
+  }
+
   return {
-    section: get("Section", "section") || "Standard",
-    description: get("Description", "description"),
-    itemNumber: get("Item Number", "itemNumber", "Item Number ") || nextItemNumber("PL"),
-    materialType: get("Material Type", "materialType"),
-    category: get("Category", "category"),
-    type: get("Type", "type"),
-    dimensions: get("Dimensions", "dimensions"),
-    w: num(get("W", "w")),
-    h: num(get("H", "h")),
-    substrate: get("Substrate", "substrate"),
-    vinyl: get("Vinyl", "vinyl"),
-    overlay: get("Overlay", "overlay"),
-    p100: num(get("100%", "p100", "P100")),
-    p110: num(get("110%", "p110", "P110")),
-    p120: num(get("120%", "p120", "P120")),
-    p140: num(get("140%", "p140", "P140")),
-    p180: num(get("180%", "p180", "P180")),
-    notes: get("Notes", "notes"),
-    key: [get("W", "w"), get("H", "h"), get("Substrate", "substrate"), get("Vinyl", "vinyl"), get("Overlay", "overlay"), get("Description", "description")].join("|")
+    section, description, itemNumber, materialType, category, type, dimensions,
+    w, h, substrate, vinyl, overlay, p100, p110, p120, p140, p180, notes,
+    key: [w || "", h || "", substrate || "", vinyl || "", overlay || "", description].join("|")
   };
 }
 function deleteAllInCollection(name) {
@@ -980,6 +1083,11 @@ function deleteAllInCollection(name) {
 }
 
 // ---------------- CLIENTS ----------------
+const CLIENT_FIELD_DEFS = [
+  { key: "name", label: "Client Name", required: true, aliases: ["Name", "Client", "Client Name", "Company"] },
+  { key: "category", label: "Category", required: false, aliases: ["Category", "Cat", "Type"] },
+  { key: "tier", label: "Tier", required: false, aliases: ["Tier", "%", "Markup"] }
+];
 function newClientCategoryChanged() {
   suggestTierFromCategory(document.getElementById("newClientCategory").value, "newClientTier");
 }
@@ -1061,18 +1169,29 @@ function saveClientEdit(id) {
 function handleClientsCsv(event) {
   const file = event.target.files[0];
   if (!file) return;
-  parseImportFile(file, rows => promptImportMode(rows, importClientRows));
+  parseImportFile(file, rows => openColumnMappingModal(rows, CLIENT_FIELD_DEFS, (rows, mapping) => {
+    promptImportMode(rows, importClientRows, buildClientPreview(rows, mapping), mapping);
+  }));
   event.target.value = "";
 }
-function importClientRows(rows, mode) {
+function buildClientPreview(rows, mapping) {
+  const sample = rows.slice(0, 3).map(r => rowToClient(r, mapping));
+  return `<p class="small">First rows as they'll be imported (Name → Tier):</p>
+    <ul class="small">${sample.map(r => `<li>${escapeHtml(r.name || "(blank name)")} → ${escapeHtml(r.tier || "—")}</li>`).join("")}</ul>`;
+}
+function rowToClient(row, mapping) {
+  const str = v => String(v === undefined || v === null ? "" : v).trim();
+  return {
+    name: str(mappedVal(row, mapping, "name")),
+    category: str(mappedVal(row, mapping, "category")),
+    tier: str(mappedVal(row, mapping, "tier")),
+    addedBy: currentUser
+  };
+}
+function importClientRows(rows, mode, mapping) {
   const existing = new Set(CLIENTS.map(c => c.name.toLowerCase()));
   const finish = () => {
-    let toAdd = rows.map(r => ({
-      name: r["Name"] || r["name"] || r["Client"] || "",
-      category: r["Category"] || r["category"] || "",
-      tier: r["Tier"] || r["tier"] || "",
-      addedBy: currentUser
-    })).filter(r => r.name);
+    let toAdd = rows.map(r => rowToClient(r, mapping)).filter(r => r.name);
     if (mode === "skipDupes") toAdd = toAdd.filter(r => !existing.has(r.name.toLowerCase()));
     let batch = db.batch(); let count = 0; const commits = [];
     toAdd.forEach(item => {
@@ -1084,7 +1203,11 @@ function importClientRows(rows, mode) {
     commits.push(batch.commit());
     Promise.all(commits).then(() => {
       logHistory("Imported clients file (" + mode + ")", toAdd.length + " row(s)");
-      alert("Imported " + toAdd.length + " client(s).");
+      if (!toAdd.length && rows.length) {
+        alert("Imported 0 client(s) out of " + rows.length + " — every row was blank in the Name column you mapped.");
+      } else {
+        alert("Imported " + toAdd.length + " client(s).");
+      }
     });
   };
   if (mode === "replace") deleteAllInCollection("clients").then(finish);
@@ -1093,6 +1216,15 @@ function importClientRows(rows, mode) {
 
 // ---------------- TM OVERRIDE ----------------
 const TM_COLS = ["c600x600_workzone", "c1200x300_workzone", "c1200x600_workzone", "c600x600_orange", "c1200x600_orange"];
+const TM_FIELD_DEFS = [
+  { key: "client", label: "TM Client Name", required: true, aliases: ["Client", "TM Client", "Name", "Company"] },
+  { key: "c600x600_workzone", label: "600x600 Workzone", required: false, aliases: ["600x600 Workzone", "c600x600_workzone"] },
+  { key: "c1200x300_workzone", label: "1200x300 Workzone", required: false, aliases: ["1200x300 Workzone", "c1200x300_workzone"] },
+  { key: "c1200x600_workzone", label: "1200x600 Workzone", required: false, aliases: ["1200x600 Workzone", "c1200x600_workzone"] },
+  { key: "c600x600_orange", label: "600x600 Orange", required: false, aliases: ["600x600 Orange", "c600x600_orange"] },
+  { key: "c1200x600_orange", label: "1200x600 Orange", required: false, aliases: ["1200x600 Orange", "c1200x600_orange"] },
+  { key: "notes", label: "Notes", required: false, aliases: ["Notes", "Note", "Comment", "Comments"] }
+];
 function renderTmTable() {
   const search = (document.getElementById("tmSearch")?.value || "").toLowerCase();
   const hasRateFilter = document.getElementById("tmFilterHasRate")?.value || "";
@@ -1166,22 +1298,33 @@ function saveTmEdit(id) {
 function handleTmCsv(event) {
   const file = event.target.files[0];
   if (!file) return;
-  parseImportFile(file, rows => promptImportMode(rows, importTmRows));
+  parseImportFile(file, rows => openColumnMappingModal(rows, TM_FIELD_DEFS, (rows, mapping) => {
+    promptImportMode(rows, importTmRows, buildTmPreview(rows, mapping), mapping);
+  }));
   event.target.value = "";
 }
-function importTmRows(rows, mode) {
+function buildTmPreview(rows, mapping) {
+  const sample = rows.slice(0, 3).map(r => rowToTm(r, mapping));
+  return `<p class="small">First rows as they'll be imported (Client):</p>
+    <ul class="small">${sample.map(r => `<li>${escapeHtml(r.client || "(blank client)")}</li>`).join("")}</ul>`;
+}
+function rowToTm(row, mapping) {
+  const num = v => v === "" || v === undefined || v === null ? null : parseFloat(v);
+  const str = v => String(v === undefined || v === null ? "" : v).trim();
+  return {
+    client: str(mappedVal(row, mapping, "client")),
+    c600x600_workzone: num(mappedVal(row, mapping, "c600x600_workzone")),
+    c1200x300_workzone: num(mappedVal(row, mapping, "c1200x300_workzone")),
+    c1200x600_workzone: num(mappedVal(row, mapping, "c1200x600_workzone")),
+    c600x600_orange: num(mappedVal(row, mapping, "c600x600_orange")),
+    c1200x600_orange: num(mappedVal(row, mapping, "c1200x600_orange")),
+    notes: str(mappedVal(row, mapping, "notes"))
+  };
+}
+function importTmRows(rows, mode, mapping) {
   const existing = new Set(TM_OVERRIDE.map(r => (r.client || "").toLowerCase()));
-  const num = v => v === "" || v === undefined ? null : parseFloat(v);
   const finish = () => {
-    let toAdd = rows.map(r => ({
-      client: r["Client"] || r["client"] || r["TM Client"] || "",
-      c600x600_workzone: num(r["600x600 Workzone"] || r["c600x600_workzone"]),
-      c1200x300_workzone: num(r["1200x300 Workzone"] || r["c1200x300_workzone"]),
-      c1200x600_workzone: num(r["1200x600 Workzone"] || r["c1200x600_workzone"]),
-      c600x600_orange: num(r["600x600 Orange"] || r["c600x600_orange"]),
-      c1200x600_orange: num(r["1200x600 Orange"] || r["c1200x600_orange"]),
-      notes: r["Notes"] || r["notes"] || ""
-    })).filter(r => r.client);
+    let toAdd = rows.map(r => rowToTm(r, mapping)).filter(r => r.client);
     if (mode === "skipDupes") toAdd = toAdd.filter(r => !existing.has(r.client.toLowerCase()));
     let batch = db.batch(); let count = 0; const commits = [];
     toAdd.forEach(item => {
@@ -1193,7 +1336,11 @@ function importTmRows(rows, mode) {
     commits.push(batch.commit());
     Promise.all(commits).then(() => {
       logHistory("Imported TM override file (" + mode + ")", toAdd.length + " row(s)");
-      alert("Imported " + toAdd.length + " row(s).");
+      if (!toAdd.length && rows.length) {
+        alert("Imported 0 row(s) out of " + rows.length + " — every row was blank in the Client column you mapped.");
+      } else {
+        alert("Imported " + toAdd.length + " row(s).");
+      }
     });
   };
   if (mode === "replace") deleteAllInCollection("tmOverride").then(finish);
