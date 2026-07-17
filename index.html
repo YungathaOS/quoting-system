@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Yungatha Quoting Tool</title>
+<style>
+:root{
+  --bg:#1a1a1a; --panel:#232323; --panel2:#2a2a2a; --border:#3a3a3a;
+  --amber:#e8a33d; --amber-dim:#c98a2e; --text:#f0f0f0; --text-dim:#a8a8a8;
+  --danger:#d9534f; --ok:#5cb85c;
+}
+*{box-sizing:border-box;}
+body{margin:0;font-family:Segoe UI,Arial,sans-serif;background:var(--bg);color:var(--text);}
+.center-screen{min-height:100vh;display:flex;align-items:center;justify-content:center;flex-direction:column;padding:20px;}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:28px;max-width:420px;width:100%;text-align:center;}
+h1{color:var(--amber);font-size:1.4em;margin-top:0;}
+.logo{font-size:2.2em;font-weight:bold;color:var(--amber);letter-spacing:1px;margin-bottom:6px;}
+input[type=password],input[type=text],select,input[type=number]{
+  width:100%;padding:10px;font-size:1em;background:var(--panel2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;margin:6px 0;
+}
+button{background:var(--amber);color:#1a1a1a;border:none;padding:10px 18px;border-radius:6px;
+  font-weight:bold;font-size:1em;cursor:pointer;margin-top:8px;}
+button:hover{background:var(--amber-dim);}
+button.secondary{background:var(--panel2);color:var(--text);border:1px solid var(--border);}
+button.danger{background:var(--danger);color:white;}
+.error-msg{color:var(--danger);min-height:20px;font-size:0.9em;}
+.name-btn{display:block;width:100%;text-align:left;background:var(--panel2);color:var(--text);
+  border:1px solid var(--border);margin:5px 0;padding:12px;border-radius:6px;font-size:1.05em;}
+.name-btn:hover{background:var(--amber);color:#1a1a1a;}
+
+#app{display:none;}
+header{background:var(--panel);border-bottom:2px solid var(--amber);padding:12px 20px;
+  display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;}
+header .title{color:var(--amber);font-weight:bold;font-size:1.2em;}
+header .who{color:var(--text-dim);font-size:0.9em;}
+nav{display:flex;gap:6px;background:var(--panel);padding:8px 14px;flex-wrap:wrap;border-bottom:1px solid var(--border);}
+nav button{background:var(--panel2);color:var(--text-dim);padding:8px 14px;margin:0;}
+nav button.active{background:var(--amber);color:#1a1a1a;}
+main{padding:18px;max-width:1200px;margin:0 auto;}
+.tab{display:none;}
+.tab.active{display:block;}
+section.box{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:16px;margin-bottom:16px;}
+section.box h2{color:var(--amber);font-size:1.05em;margin-top:0;border-bottom:1px solid var(--border);padding-bottom:8px;}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;}
+label{font-size:0.85em;color:var(--text-dim);display:block;margin-top:6px;}
+table{width:100%;border-collapse:collapse;font-size:0.9em;}
+th,td{border:1px solid var(--border);padding:6px 8px;text-align:left;}
+th{background:var(--panel2);color:var(--amber);}
+tr:hover td{background:#2f2f2f;}
+.result-line{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px dashed var(--border);}
+.result-line.total{font-size:1.3em;color:var(--amber);font-weight:bold;border-bottom:none;}
+.small{font-size:0.8em;color:var(--text-dim);}
+.pill{display:inline-block;background:var(--panel2);border:1px solid var(--border);border-radius:12px;
+  padding:2px 10px;font-size:0.8em;margin-left:6px;}
+.search-box{width:100%;padding:8px;margin-bottom:8px;}
+.flex-row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;}
+.flex-row > div{flex:1;min-width:140px;}
+.banner{background:#3a2f1a;border:1px solid var(--amber);color:var(--amber);padding:10px;border-radius:6px;margin-bottom:14px;font-size:0.9em;}
+#syncDot{width:9px;height:9px;border-radius:50%;display:inline-block;background:var(--ok);margin-right:5px;}
+#syncDot.off{background:var(--danger);}
+</style>
+</head>
+<body>
+
+<!-- SCREEN 1: PASSWORD GATE -->
+<div id="screenPassword" class="center-screen">
+  <div class="card">
+    <div class="logo">YUNGATHA</div>
+    <h1>Quoting Tool — Team Access</h1>
+    <p class="small">Enter the team password to continue.</p>
+    <input type="password" id="passwordInput" placeholder="Team password" autocomplete="off">
+    <div class="error-msg" id="passwordError"></div>
+    <button onclick="checkPassword()">Enter</button>
+  </div>
+</div>
+
+<!-- SCREEN 2: NAME PICKER -->
+<div id="screenName" class="center-screen" style="display:none;">
+  <div class="card">
+    <div class="logo">YUNGATHA</div>
+    <h1>Who are you?</h1>
+    <p class="small">Tap your name. Everything you do gets logged under this name.</p>
+    <div id="nameList"></div>
+    <hr style="border-color:var(--border);margin:16px 0;">
+    <p class="small">Not on the list?</p>
+    <input type="text" id="newNameInput" placeholder="Type your full name">
+    <button class="secondary" onclick="addNewName()">Add me &amp; continue</button>
+  </div>
+</div>
+
+<!-- MAIN APP -->
+<div id="app">
+  <header>
+    <div class="title">🏗️ YUNGATHA QUOTING TOOL <span id="syncDot"></span></div>
+    <div class="who">Logged in as <b id="currentUserName"></b> &nbsp;
+      <button class="secondary" style="padding:5px 10px;font-size:0.8em;" onclick="switchUser()">Switch user</button>
+    </div>
+  </header>
+  <nav>
+    <button class="active" onclick="showTab('quote')">Quote Calculator</button>
+    <button onclick="showTab('pricelookup')">Price Lookup</button>
+    <button onclick="showTab('clients')">Clients</button>
+    <button onclick="showTab('tm')">TM Override</button>
+    <button onclick="showTab('history')">History</button>
+    <button onclick="showTab('admin')">Team / Setup</button>
+  </nav>
+  <main>
+
+    <!-- TAB: QUOTE CALCULATOR -->
+    <div id="tab-quote" class="tab active">
+      <section class="box">
+        <h2>1. Client Details</h2>
+        <div class="grid">
+          <div>
+            <label>Client Name</label>
+            <input list="clientListDatalist" id="qClient" oninput="onClientChange()" placeholder="Start typing client name...">
+            <datalist id="clientListDatalist"></datalist>
+          </div>
+          <div>
+            <label>Tier</label>
+            <input type="text" id="qTier" readonly>
+          </div>
+          <div>
+            <label>Markup</label>
+            <input type="text" id="qMarkup" readonly>
+          </div>
+        </div>
+      </section>
+
+      <section class="box">
+        <h2>2. Size &amp; Price Lookup <span class="small">(standard sizes — auto price)</span></h2>
+        <div class="grid">
+          <div><label>W (mm)</label><input type="number" id="qW" oninput="calc()"></div>
+          <div><label>H (mm)</label><input type="number" id="qH" oninput="calc()"></div>
+          <div><label>Substrate</label><input list="substrateList" id="qSubstrate" oninput="calc()"><datalist id="substrateList"></datalist></div>
+          <div><label>Vinyl / Film</label><input list="vinylList" id="qVinyl" oninput="calc()"><datalist id="vinylList"></datalist></div>
+          <div><label>Overlay</label><input list="overlayList" id="qOverlay" oninput="calc()"><datalist id="overlayList"></datalist></div>
+          <div><label>Extras</label><input list="extrasList" id="qExtras" oninput="calc()"><datalist id="extrasList"></datalist></div>
+        </div>
+        <div class="result-line"><span>SQM</span><span id="qSqm">—</span></div>
+        <div class="result-line total"><span>Standard Price Result</span><span id="qStdPrice">—</span></div>
+        <p class="small" id="qStdNote"></p>
+      </section>
+
+      <section class="box">
+        <h2>3. Custom Sign Builder <span class="small">(if size/combo wasn't found above)</span></h2>
+        <table id="signBuilderTable">
+          <thead><tr><th>Layer</th><th>Material</th><th>$/SQM</th><th>Include?</th><th>Cost</th></tr></thead>
+          <tbody>
+            <tr><td>Substrate</td><td><input list="matSubstrateList" id="sbSubstrate" oninput="calc()"><datalist id="matSubstrateList"></datalist></td><td id="sbSubstrateRate">—</td><td><select id="sbSubstrateInc" onchange="calc()"><option>YES</option><option>NO</option></select></td><td id="sbSubstrateCost">—</td></tr>
+            <tr><td>Vinyl/Film</td><td><input list="matVinylList" id="sbVinyl" oninput="calc()"><datalist id="matVinylList"></datalist></td><td id="sbVinylRate">—</td><td><select id="sbVinylInc" onchange="calc()"><option>YES</option><option>NO</option></select></td><td id="sbVinylCost">—</td></tr>
+            <tr><td>Overlay</td><td><input list="matOverlayList" id="sbOverlay" oninput="calc()"><datalist id="matOverlayList"></datalist></td><td id="sbOverlayRate">—</td><td><select id="sbOverlayInc" onchange="calc()"><option>YES</option><option>NO</option></select></td><td id="sbOverlayCost">—</td></tr>
+            <tr><td>Extras</td><td><input list="matExtrasList" id="sbExtras" oninput="calc()"><datalist id="matExtrasList"></datalist></td><td id="sbExtrasRate">—</td><td><select id="sbExtrasInc" onchange="calc()"><option>YES</option><option>NO</option></select></td><td id="sbExtrasCost">—</td></tr>
+            <tr><td>Ink</td><td><input value="Ink" id="sbInk" readonly></td><td id="sbInkRate">—</td><td><select id="sbInkInc" onchange="calc()"><option>YES</option><option>NO</option></select></td><td id="sbInkCost">—</td></tr>
+          </tbody>
+        </table>
+        <label>Sticker Markup Override (optional, e.g. 2.5 for 250%)</label>
+        <input type="number" step="0.1" id="qOverride" oninput="calc()" style="max-width:200px;">
+      </section>
+
+      <section class="box">
+        <h2>4. Summary</h2>
+        <div class="result-line"><span>Raw Material Cost</span><span id="rRaw">—</span></div>
+        <div class="result-line"><span>+ Wastage (15%)</span><span id="rWastage">—</span></div>
+        <div class="result-line"><span>Raw + Wastage</span><span id="rRawWastage">—</span></div>
+        <div class="result-line"><span>Markup Applied</span><span id="rMarkupLabel">—</span></div>
+        <div class="result-line"><span>Cost + Markup</span><span id="rCostMarkup">—</span></div>
+        <label>Qty / Units</label>
+        <input type="number" id="qQty" value="1" style="max-width:120px;" oninput="calc()">
+        <div class="result-line total"><span>SELL PRICE (ex GST)</span><span id="rSell">—</span></div>
+        <div class="flex-row" style="margin-top:14px;">
+          <button onclick="resetQuote()" class="secondary">🔄 Reset</button>
+          <button onclick="addSignToLookup()">➕ Add This Sign to Price Lookup</button>
+        </div>
+      </section>
+
+      <section class="box">
+        <h2>Quick Accessory / Labour Lookup</h2>
+        <div class="flex-row">
+          <div>
+            <label>Accessory or Labour item</label>
+            <input list="accessoryLabourList" id="qAccItem">
+            <datalist id="accessoryLabourList"></datalist>
+          </div>
+          <div>
+            <label>Price at your tier</label>
+            <input type="text" id="qAccPrice" readonly>
+          </div>
+          <div><button onclick="lookupAccessory()">Look up price</button></div>
+        </div>
+        <div class="flex-row" style="margin-top:10px;">
+          <div><label>New item name (if not found)</label><input type="text" id="qNewItemName"></div>
+          <div><label>New item price at current tier</label><input type="number" id="qNewItemPrice"></div>
+          <div><label>Category</label><input list="accCategoryList" id="qNewItemCategory"><datalist id="accCategoryList"></datalist></div>
+          <div><button onclick="addAccessory()">➕ Add to Price Lookup</button></div>
+        </div>
+      </section>
+    </div>
+
+    <!-- TAB: PRICE LOOKUP -->
+    <div id="tab-pricelookup" class="tab">
+      <section class="box">
+        <h2>Price Lookup (synced — everyone sees the same list)</h2>
+        <input type="text" class="search-box" id="plSearch" placeholder="Search description..." oninput="renderPriceLookupTable()">
+        <div style="max-height:500px;overflow:auto;">
+          <table><thead><tr><th>Section</th><th>Description</th><th>100%</th><th>110%</th><th>120%</th><th>140%</th><th>180%</th><th>Notes</th></tr></thead>
+          <tbody id="plTableBody"></tbody></table>
+        </div>
+      </section>
+    </div>
+
+    <!-- TAB: CLIENTS -->
+    <div id="tab-clients" class="tab">
+      <section class="box">
+        <h2>Add New Client</h2>
+        <div class="flex-row">
+          <div><label>Client Name</label><input type="text" id="newClientName"></div>
+          <div><label>Category</label><input list="clientCatList" id="newClientCategory"><datalist id="clientCatList"></datalist></div>
+          <div><label>Tier</label>
+            <select id="newClientTier">
+              <option>100%</option><option>110%</option><option>120%</option>
+              <option>140%</option><option>180%</option><option>TM</option><option>MRWA</option>
+            </select>
+          </div>
+          <div><button onclick="addClient()">➕ Add Client</button></div>
+        </div>
+      </section>
+      <section class="box">
+        <h2>Client List (synced)</h2>
+        <input type="text" class="search-box" id="clSearch" placeholder="Search clients..." oninput="renderClientTable()">
+        <div style="max-height:500px;overflow:auto;">
+          <table><thead><tr><th>Client</th><th>Category</th><th>Tier</th><th>Added By</th></tr></thead>
+          <tbody id="clTableBody"></tbody></table>
+        </div>
+      </section>
+    </div>
+
+    <!-- TAB: TM OVERRIDE -->
+    <div id="tab-tm" class="tab">
+      <section class="box">
+        <h2>TM Client Override Pricing (Corflute Signs)</h2>
+        <p class="small">Blank = no negotiated rate. Verify with Sales Manager before quoting.</p>
+        <input type="text" class="search-box" id="tmSearch" placeholder="Search TM client..." oninput="renderTmTable()">
+        <div style="max-height:500px;overflow:auto;">
+          <table><thead><tr><th>TM Client</th><th>600x600 Workzone</th><th>1200x300 Workzone</th><th>1200x600 Workzone</th><th>600x600 Orange</th><th>1200x600 Orange</th><th>Notes</th></tr></thead>
+          <tbody id="tmTableBody"></tbody></table>
+        </div>
+      </section>
+    </div>
+
+    <!-- TAB: HISTORY -->
+    <div id="tab-history" class="tab">
+      <section class="box">
+        <h2>Activity History — who did what</h2>
+        <div style="max-height:600px;overflow:auto;">
+          <table><thead><tr><th>When</th><th>Who</th><th>Action</th><th>Details</th></tr></thead>
+          <tbody id="historyTableBody"></tbody></table>
+        </div>
+      </section>
+    </div>
+
+    <!-- TAB: ADMIN -->
+    <div id="tab-admin" class="tab">
+      <section class="box">
+        <h2>Team Members</h2>
+        <p class="small">Names that show up on the "Who are you?" screen.</p>
+        <div class="flex-row">
+          <div><input type="text" id="teamNewName" placeholder="Full name"></div>
+          <div><button onclick="addTeamMember()">➕ Add</button></div>
+        </div>
+        <ul id="teamList"></ul>
+      </section>
+      <section class="box">
+        <h2>Starter Data</h2>
+        <p class="small">Only needed ONCE, the very first time this app is set up. If the Price Lookup / Client / TM tables above are empty, click this to load the original numbers from the Yungatha Excel file.</p>
+        <div id="seedStatus" class="banner" style="display:none;"></div>
+        <button onclick="loadSeedData()">⬆️ Load Starter Data From Excel</button>
+      </section>
+    </div>
+
+  </main>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
+<script src="seed-data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
