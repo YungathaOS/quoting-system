@@ -73,6 +73,10 @@ tr:hover td{background:#2f2f2f;}
 .close-x{float:right;cursor:pointer;color:var(--text-dim);font-size:1.2em;}
 .extras-row{display:grid;grid-template-columns:2fr 1fr 1fr 1fr auto;gap:8px;align-items:end;margin-bottom:6px;}
 .extras-row label{margin-top:0;}
+.clients-layout{display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start;}
+.clients-layout > .box{flex:2;min-width:280px;}
+.tier-key{flex:1;min-width:220px;max-width:280px;}
+.tier-key table{font-size:0.85em;}
 </style>
 </head>
 <body>
@@ -143,14 +147,14 @@ tr:hover td{background:#2f2f2f;}
       </section>
 
       <section class="box">
-        <h2>2. Size &amp; Price Lookup <span class="small">(standard sizes — auto price, auto-fills Sign Builder below)</span></h2>
+        <h2>2. Size &amp; Price Lookup <span class="small">(standard sizes — auto price, always mirrors into Sign Builder below)</span></h2>
         <div class="grid">
           <div><label>W (mm)</label><input type="number" id="qW" oninput="calc()"></div>
           <div><label>H (mm)</label><input type="number" id="qH" oninput="calc()"></div>
-          <div><label>Substrate</label><input list="substrateList" id="qSubstrate" oninput="calc()"><datalist id="substrateList"></datalist></div>
-          <div><label>Vinyl / Film</label><input list="vinylList" id="qVinyl" oninput="calc()"><datalist id="vinylList"></datalist></div>
-          <div><label>Overlay</label><input list="overlayList" id="qOverlay" oninput="calc()"><datalist id="overlayList"></datalist></div>
-          <div><label>Extras</label><input list="extrasList" id="qExtras" oninput="calc()"><datalist id="extrasList"></datalist></div>
+          <div><label>Substrate</label><input list="substrateList" id="qSubstrate" oninput="qSubstrateChanged()"><datalist id="substrateList"></datalist></div>
+          <div><label>Vinyl / Film</label><input list="vinylList" id="qVinyl" oninput="qVinylChanged()"><datalist id="vinylList"></datalist></div>
+          <div><label>Overlay</label><input list="overlayList" id="qOverlay" oninput="qOverlayChanged()"><datalist id="overlayList"></datalist></div>
+          <div><label>Extras</label><input list="extrasList" id="qExtras" oninput="qExtrasChanged()"><datalist id="extrasList"></datalist></div>
         </div>
         <div class="result-line"><span>SQM</span><span id="qSqm">—</span></div>
         <div class="result-line total"><span>Standard Price Result</span><span id="qStdPrice">—</span></div>
@@ -158,7 +162,7 @@ tr:hover td{background:#2f2f2f;}
       </section>
 
       <section class="box">
-        <h2>3. Custom Sign Builder <span class="small">(auto-fills from Section 2 as you type)</span></h2>
+        <h2>3. Custom Sign Builder <span class="small">(always follows Section 2 — correct a selection above and this updates too)</span></h2>
         <table id="signBuilderTable">
           <thead><tr><th>Layer</th><th>Material</th><th>$/SQM</th><th>Include?</th><th>Cost</th></tr></thead>
           <tbody>
@@ -192,7 +196,7 @@ tr:hover td{background:#2f2f2f;}
         <input type="number" id="qQty" value="1" style="max-width:120px;" oninput="calc()">
         <div class="result-line total"><span>SELL PRICE (ex GST)</span><span id="rSell">—</span></div>
         <div class="flex-row" style="margin-top:14px;">
-          <button onclick="resetQuote()" class="secondary">🔄 Reset</button>
+          <button onclick="resetQuote()" class="secondary">🔄 Reset ALL Fields</button>
           <button onclick="addSignToLookup()">➕ Add This Sign to Price Lookup</button>
           <button onclick="addToQuote()">🧾 Add to Quote</button>
         </div>
@@ -212,6 +216,10 @@ tr:hover td{background:#2f2f2f;}
             <div><label>Price at current tier</label><input type="number" id="qNewItemPrice"></div>
             <div><button id="qaAddBtn" onclick="addAccessory()">➕ Add to Price Lookup</button></div>
           </div>
+        </div>
+        <div class="flex-row" style="margin-top:10px;border-top:1px dashed var(--border);padding-top:10px;">
+          <div><label>Qty</label><input type="number" id="qaQty" value="1" min="0" step="1" style="max-width:100px;"></div>
+          <div><button onclick="addAccessoryToQuote()">🧾 Add to Quote</button></div>
         </div>
       </section>
 
@@ -236,10 +244,11 @@ tr:hover td{background:#2f2f2f;}
       <section class="box">
         <h2>Price Lookup (synced — everyone sees the same list)</h2>
         <div class="toolbar">
-          <input type="file" id="plCsvInput" accept=".csv" style="max-width:260px;" onchange="handlePriceLookupCsv(event)">
+          <input type="file" id="plCsvInput" accept=".csv,.xlsx,.xls,.xlsm" style="max-width:280px;" onchange="handlePriceLookupCsv(event)">
           <button class="secondary" onclick="openAddItemModal()">➕ Add Item</button>
           <button class="danger" onclick="bulkDeletePriceLookup()">🗑️ Delete Selected</button>
         </div>
+        <p class="small">Upload accepts CSV, Excel (.xlsx/.xls) or macro-enabled Excel (.xlsm).</p>
         <div class="filter-row">
           <input type="text" class="search-box" id="plSearch" placeholder="Search description..." oninput="renderPriceLookupTable()" style="flex:2;">
           <div><label>Section</label><select id="plFilterSection" onchange="renderPriceLookupTable()"><option value="">All</option></select></div>
@@ -254,36 +263,57 @@ tr:hover td{background:#2f2f2f;}
 
     <!-- TAB: CLIENTS -->
     <div id="tab-clients" class="tab">
-      <section class="box">
-        <h2>Add New Client</h2>
-        <div class="flex-row">
-          <div><label>Client Name</label><input type="text" id="newClientName"></div>
-          <div><label>Category</label><input list="clientCatList" id="newClientCategory"><datalist id="clientCatList"></datalist></div>
-          <div><label>Tier</label>
-            <select id="newClientTier">
-              <option>100%</option><option>110%</option><option>120%</option>
-              <option>140%</option><option>180%</option><option>TM</option><option>MRWA</option>
-            </select>
-          </div>
-          <div><button onclick="addClient()">➕ Add Client</button></div>
+      <div class="clients-layout">
+        <div>
+          <section class="box">
+            <h2>Add New Client</h2>
+            <div class="flex-row">
+              <div><label>Client Name</label><input type="text" id="newClientName"></div>
+              <div><label>Category</label><input list="clientCatList" id="newClientCategory" oninput="newClientCategoryChanged()"><datalist id="clientCatList"></datalist></div>
+              <div><label>Tier</label>
+                <select id="newClientTier">
+                  <option>100%</option><option>110%</option><option>120%</option>
+                  <option>140%</option><option>180%</option><option>TM</option><option>MRWA</option>
+                </select>
+              </div>
+              <div><button onclick="addClient()">➕ Add Client</button></div>
+            </div>
+            <p class="small">Picking a Category will suggest a Tier based on similar existing clients — the Tier dropdown always stays changeable.</p>
+          </section>
+          <section class="box">
+            <h2>Client List (synced)</h2>
+            <div class="toolbar">
+              <input type="file" id="clCsvInput" accept=".csv,.xlsx,.xls,.xlsm" style="max-width:280px;" onchange="handleClientsCsv(event)">
+              <button class="danger" onclick="bulkDeleteClients()">🗑️ Delete Selected</button>
+            </div>
+            <p class="small">Upload accepts CSV, Excel (.xlsx/.xls) or macro-enabled Excel (.xlsm).</p>
+            <div class="filter-row">
+              <input type="text" class="search-box" id="clSearch" placeholder="Search clients..." oninput="renderClientTable()" style="flex:2;">
+              <div><label>Category</label><select id="clFilterCategory" onchange="renderClientTable()"><option value="">All</option></select></div>
+              <div><label>Tier</label><select id="clFilterTier" onchange="renderClientTable()"><option value="">All</option></select></div>
+            </div>
+            <div style="max-height:500px;overflow:auto;">
+              <table><thead><tr><th><input type="checkbox" id="clSelectAll" onchange="toggleClSelectAll(this)"></th><th>Client</th><th>Category</th><th>Tier</th><th>Added By</th><th></th></tr></thead>
+              <tbody id="clTableBody"></tbody></table>
+            </div>
+          </section>
         </div>
-      </section>
-      <section class="box">
-        <h2>Client List (synced)</h2>
-        <div class="toolbar">
-          <input type="file" id="clCsvInput" accept=".csv" style="max-width:260px;" onchange="handleClientsCsv(event)">
-          <button class="danger" onclick="bulkDeleteClients()">🗑️ Delete Selected</button>
+        <div class="box tier-key">
+          <h2>Tier Key</h2>
+          <table>
+            <thead><tr><th>Tier</th><th>Markup</th></tr></thead>
+            <tbody>
+              <tr><td>100%</td><td>x 2.0</td></tr>
+              <tr><td>110%</td><td>x 2.1</td></tr>
+              <tr><td>120%</td><td>x 2.2</td></tr>
+              <tr><td>140%</td><td>x 2.4</td></tr>
+              <tr><td>180%</td><td>x 2.8</td></tr>
+              <tr><td>TM</td><td class="small">Traffic Management — check TM Override tab for negotiated rates</td></tr>
+              <tr><td>MRWA</td><td class="small">Main Roads WA — price entered manually per job</td></tr>
+            </tbody>
+          </table>
         </div>
-        <div class="filter-row">
-          <input type="text" class="search-box" id="clSearch" placeholder="Search clients..." oninput="renderClientTable()" style="flex:2;">
-          <div><label>Category</label><select id="clFilterCategory" onchange="renderClientTable()"><option value="">All</option></select></div>
-          <div><label>Tier</label><select id="clFilterTier" onchange="renderClientTable()"><option value="">All</option></select></div>
-        </div>
-        <div style="max-height:500px;overflow:auto;">
-          <table><thead><tr><th><input type="checkbox" id="clSelectAll" onchange="toggleClSelectAll(this)"></th><th>Client</th><th>Category</th><th>Tier</th><th>Added By</th><th></th></tr></thead>
-          <tbody id="clTableBody"></tbody></table>
-        </div>
-      </section>
+      </div>
     </div>
 
     <!-- TAB: TM OVERRIDE -->
@@ -292,10 +322,11 @@ tr:hover td{background:#2f2f2f;}
         <h2>TM Client Override Pricing (Corflute Signs)</h2>
         <p class="small">Blank = no negotiated rate. Verify with Sales Manager before quoting.</p>
         <div class="toolbar">
-          <input type="file" id="tmCsvInput" accept=".csv" style="max-width:260px;" onchange="handleTmCsv(event)">
+          <input type="file" id="tmCsvInput" accept=".csv,.xlsx,.xls,.xlsm" style="max-width:280px;" onchange="handleTmCsv(event)">
           <button class="secondary" onclick="openAddTmModal()">➕ Add Client Row</button>
           <button class="danger" onclick="bulkDeleteTm()">🗑️ Delete Selected</button>
         </div>
+        <p class="small">Upload accepts CSV, Excel (.xlsx/.xls) or macro-enabled Excel (.xlsm).</p>
         <div class="filter-row">
           <input type="text" class="search-box" id="tmSearch" placeholder="Search TM client..." oninput="renderTmTable()" style="flex:2;">
           <div><label>Show</label><select id="tmFilterHasRate" onchange="renderTmTable()">
