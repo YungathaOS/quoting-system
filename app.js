@@ -318,6 +318,28 @@ function tierPriceForItem(item, tier) {
   return field ? item[field] : null;
 }
 
+// ---------------- SECTION 2 -> SECTION 3 SYNC ----------------
+// Correcting Substrate/Vinyl/Overlay/Extras in "Size & Price Lookup" always
+// overwrites the matching Custom Sign Builder field, so a fixed mistake there
+// always carries through. Editing the Sign Builder fields directly (without
+// touching Section 2) is NOT overwritten by unrelated recalculations.
+function qSubstrateChanged() {
+  document.getElementById("sbSubstrate").value = document.getElementById("qSubstrate").value;
+  calc();
+}
+function qVinylChanged() {
+  document.getElementById("sbVinyl").value = document.getElementById("qVinyl").value;
+  calc();
+}
+function qOverlayChanged() {
+  document.getElementById("sbOverlay").value = document.getElementById("qOverlay").value;
+  calc();
+}
+function qExtrasChanged() {
+  document.getElementById("sbExtras").value = document.getElementById("qExtras").value;
+  calc();
+}
+
 // ---------------- MAIN CALCULATOR ----------------
 function calc() {
   const tier = currentTier();
@@ -330,19 +352,6 @@ function calc() {
 
   const sqm = (w > 0 && h > 0) ? (w * h) / 1000000 : null;
   document.getElementById("qSqm").textContent = sqm ? sqm.toFixed(3) : "—";
-
-  // --- Auto-fill Custom Sign Builder (section 3) from Section 2 ---
-  // Always mirrors Section 2 into Section 3 as soon as Section 2 has a value,
-  // regardless of tier/client/whether an exact Standard price match exists.
-  // Only fills empty fields so it never overwrites something you typed by hand.
-  const sbS = document.getElementById("sbSubstrate");
-  const sbV = document.getElementById("sbVinyl");
-  const sbO = document.getElementById("sbOverlay");
-  const sbE = document.getElementById("sbExtras");
-  if (sbS && substrate && !sbS.value) sbS.value = substrate;
-  if (sbV && vinyl && !sbV.value) sbV.value = vinyl;
-  if (sbO && overlay && !sbO.value) sbO.value = overlay;
-  if (sbE && extras && !sbE.value) sbE.value = extras;
 
   // --- Section 2: standard size/price lookup ---
   let stdPrice = null, stdNote = "";
@@ -391,7 +400,7 @@ function calc() {
     const matInputId = prefix; // sbSubstrate, sbVinyl, etc.
     let matVal;
     if (layer === "Ink") { matVal = "Ink"; }
-    else { matVal = document.getElementById(matInputId).value || materials[layer]; }
+    else { matVal = document.getElementById(matInputId).value; }
     const rate = rawRate(matVal);
     document.getElementById(prefix + "Rate").textContent = rate !== null ? money(rate) + "/sqm" : "—";
     const include = document.getElementById(prefix + "Inc").value;
@@ -440,6 +449,10 @@ function calc() {
 }
 
 function resetQuote() {
+  // Clears every field on the Quote Calculator tab, including the Quick
+  // Accessory/Labour Lookup and (with confirmation) the current Quote cart.
+  if (QUOTE_CART.length && !confirm("This will also clear the " + QUOTE_CART.length + " line(s) currently in your Quote. Continue with Reset ALL?")) return;
+
   ["qW", "qH", "qSubstrate", "qVinyl", "qOverlay", "qExtras", "qOverride", "sbSubstrate", "sbVinyl", "sbOverlay", "sbExtras"].forEach(id => document.getElementById(id).value = "");
   document.getElementById("qQty").value = 1;
   ["sbSubstrateInc", "sbVinylInc", "sbOverlayInc", "sbExtrasInc", "sbInkInc"].forEach(id => document.getElementById(id).value = "YES");
@@ -451,12 +464,15 @@ function resetQuote() {
   document.getElementById("qaDimension").value = "";
   document.getElementById("qAccPrice").value = "";
   document.getElementById("qNewItemPrice").value = "";
+  document.getElementById("qaQty").value = 1;
   QA_MATCH_ID = null;
   qaEvalMatch();
   EXTRAS_ROW_IDS.slice().forEach(id => removeExtraRow(id, true));
   addExtraRow();
+  QUOTE_CART = [];
+  renderQuoteCart();
   calc();
-  logHistory("Reset quote fields", "");
+  logHistory("Reset ALL quote fields", "");
 }
 
 // ---------------- EXTRAS (Section 4) — plain text add-on, qty x unit price ----------------
@@ -621,6 +637,33 @@ function addAccessory() {
     document.getElementById("qNewItemPrice").value = "";
     alert("Added '" + itemName + "' — all 5 tiers calculated from the " + tier + " price.");
   });
+}
+function addAccessoryToQuote() {
+  const category = document.getElementById("qaCategory").value.trim();
+  const type = document.getElementById("qaType").value.trim();
+  const dimensions = document.getElementById("qaDimension").value.trim();
+  const desc = [category, type, dimensions].filter(Boolean).join(" - ");
+  if (!desc) { alert("Fill in Category / Type / Dimension first."); return; }
+  const qty = parseFloat(document.getElementById("qaQty").value) || 1;
+  const tier = currentTier();
+  let price = null, itemNumber = null;
+  if (QA_MATCH_ID) {
+    const item = PRICE_LOOKUP.find(i => i.id === QA_MATCH_ID);
+    price = tierPriceForItem(item, tier);
+    itemNumber = (item && item.itemNumber) || nextItemNumber("ACC");
+  } else {
+    price = parseFloat(document.getElementById("qNewItemPrice").value);
+    if (isNaN(price)) price = null;
+    itemNumber = nextItemNumber("ACC");
+  }
+  if (price === null || price === undefined || isNaN(price)) { alert("No price available yet — look it up (select a matching Category/Type/Dimension) or type a price in the box above first."); return; }
+  const client = document.getElementById("qClient").value || "(no client selected)";
+  QUOTE_CART.push({
+    client, qty, itemNumber, description: desc,
+    unitPrice: round2(price), lineTotal: round2(price * qty)
+  });
+  renderQuoteCart();
+  logHistory("Added accessory/labour line to quote", desc);
 }
 
 // ---------------- ADD TO QUOTE / QUOTE CART / EXPORT ----------------
@@ -819,23 +862,47 @@ function savePriceLookupEdit(id) {
   });
 }
 
-// ---------------- PRICE LOOKUP CSV IMPORT ----------------
+// ---------------- IMPORT FILE PARSING (CSV, Excel, macro-enabled Excel) ----------------
+function parseImportFile(file, callback) {
+  const ext = file.name.split(".").pop().toLowerCase();
+  if (ext === "csv") {
+    Papa.parse(file, {
+      header: true, skipEmptyLines: true,
+      complete: results => callback(results.data),
+      error: err => alert("Could not read file: " + err.message)
+    });
+  } else if (["xlsx", "xls", "xlsm"].includes(ext)) {
+    const reader = new FileReader();
+    reader.onload = e => {
+      try {
+        const wb = XLSX.read(e.target.result, { type: "array" });
+        const sheet = wb.Sheets[wb.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+        callback(rows);
+      } catch (err) {
+        alert("Could not read file: " + err.message);
+      }
+    };
+    reader.onerror = () => alert("Could not read file.");
+    reader.readAsArrayBuffer(file);
+  } else {
+    alert("Unsupported file type '." + ext + "'. Please use .csv, .xlsx, .xls or .xlsm.");
+  }
+}
+
+// ---------------- PRICE LOOKUP IMPORT (CSV / Excel) ----------------
 function handlePriceLookupCsv(event) {
   const file = event.target.files[0];
   if (!file) return;
-  Papa.parse(file, {
-    header: true, skipEmptyLines: true,
-    complete: results => promptImportMode(results.data, importPriceLookupRows),
-    error: err => alert("Could not read CSV: " + err.message)
-  });
+  parseImportFile(file, rows => promptImportMode(rows, importPriceLookupRows));
   event.target.value = "";
 }
 function promptImportMode(rows, importFn) {
   openModal(`
     <span class="close-x" onclick="closeModal()">✕</span>
-    <h3>Import ${rows.length} row(s) from CSV</h3>
+    <h3>Import ${rows.length} row(s)</h3>
     <p class="small">Choose how to handle the existing data:</p>
-    <label><input type="radio" name="importMode" value="replace"> Clear everything currently existing, then upload this CSV</label>
+    <label><input type="radio" name="importMode" value="replace"> Clear everything currently existing, then upload this file</label>
     <label><input type="radio" name="importMode" value="skipDupes" checked> Skip duplicates — only add rows that aren't already in the list</label>
     <label><input type="radio" name="importMode" value="appendAll"> Just add straight on (don't check for duplicates)</label>
     <button onclick="runImport()">Import</button>
@@ -864,7 +931,7 @@ function importPriceLookupRows(rows, mode) {
     });
     commits.push(batch.commit());
     Promise.all(commits).then(() => {
-      logHistory("Imported price lookup CSV (" + mode + ")", toAdd.length + " row(s)");
+      logHistory("Imported price lookup file (" + mode + ")", toAdd.length + " row(s)");
       alert("Imported " + toAdd.length + " row(s).");
     });
   };
@@ -913,6 +980,19 @@ function deleteAllInCollection(name) {
 }
 
 // ---------------- CLIENTS ----------------
+function newClientCategoryChanged() {
+  suggestTierFromCategory(document.getElementById("newClientCategory").value, "newClientTier");
+}
+function suggestTierFromCategory(category, tierSelectId) {
+  const cat = (category || "").trim();
+  if (!cat) return;
+  const matches = CLIENTS.filter(c => (c.category || "").toLowerCase() === cat.toLowerCase() && c.tier);
+  if (!matches.length) return;
+  const counts = {};
+  matches.forEach(c => { counts[c.tier] = (counts[c.tier] || 0) + 1; });
+  const best = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+  if (best) document.getElementById(tierSelectId).value = best[0];
+}
 function addClient() {
   const name = document.getElementById("newClientName").value.trim();
   const category = document.getElementById("newClientCategory").value.trim();
@@ -961,7 +1041,7 @@ function openEditClientModal(id) {
   openModal(`
     <span class="close-x" onclick="closeModal()">✕</span><h3>Edit Client</h3>
     <label>Name</label><input class="editable-input" id="mName" value="${escapeAttr(c.name)}">
-    <label>Category</label><input class="editable-input" id="mCatg" value="${escapeAttr(c.category || "")}">
+    <label>Category</label><input class="editable-input" id="mCatg" value="${escapeAttr(c.category || "")}" oninput="suggestTierFromCategory(this.value,'mTier')">
     <label>Tier</label>
     <select class="editable-input" id="mTier">
       ${["100%", "110%", "120%", "140%", "180%", "TM", "MRWA"].map(t => `<option ${t === c.tier ? "selected" : ""}>${t}</option>`).join("")}
@@ -981,11 +1061,7 @@ function saveClientEdit(id) {
 function handleClientsCsv(event) {
   const file = event.target.files[0];
   if (!file) return;
-  Papa.parse(file, {
-    header: true, skipEmptyLines: true,
-    complete: results => promptImportMode(results.data, importClientRows),
-    error: err => alert("Could not read CSV: " + err.message)
-  });
+  parseImportFile(file, rows => promptImportMode(rows, importClientRows));
   event.target.value = "";
 }
 function importClientRows(rows, mode) {
@@ -1007,7 +1083,7 @@ function importClientRows(rows, mode) {
     });
     commits.push(batch.commit());
     Promise.all(commits).then(() => {
-      logHistory("Imported clients CSV (" + mode + ")", toAdd.length + " row(s)");
+      logHistory("Imported clients file (" + mode + ")", toAdd.length + " row(s)");
       alert("Imported " + toAdd.length + " client(s).");
     });
   };
@@ -1090,11 +1166,7 @@ function saveTmEdit(id) {
 function handleTmCsv(event) {
   const file = event.target.files[0];
   if (!file) return;
-  Papa.parse(file, {
-    header: true, skipEmptyLines: true,
-    complete: results => promptImportMode(results.data, importTmRows),
-    error: err => alert("Could not read CSV: " + err.message)
-  });
+  parseImportFile(file, rows => promptImportMode(rows, importTmRows));
   event.target.value = "";
 }
 function importTmRows(rows, mode) {
@@ -1120,7 +1192,7 @@ function importTmRows(rows, mode) {
     });
     commits.push(batch.commit());
     Promise.all(commits).then(() => {
-      logHistory("Imported TM override CSV (" + mode + ")", toAdd.length + " row(s)");
+      logHistory("Imported TM override file (" + mode + ")", toAdd.length + " row(s)");
       alert("Imported " + toAdd.length + " row(s).");
     });
   };
